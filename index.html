@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Command Memo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background-color: #1a1a1a;
+      color: #e5e5e5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    /* スケッチのようなすっきりした枠線と角丸 */
+    .memo-card {
+      border: 1.5px solid #4a4a4a;
+      border-radius: 10px;
+      background-color: #222222;
+      transition: border-color 0.15s ease;
+    }
+    .memo-card:focus-within {
+      border-color: #999999;
+    }
+  </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8 flex justify-center">
+
+  <div class="w-full max-w-4xl flex flex-col gap-4">
+    
+    <!-- 最上段：新しいコマンドと説明を記入するマス -->
+    <div class="flex flex-col sm:flex-row gap-3">
+      <!-- コマンド入力マス (左側・少し小さめ) -->
+      <div class="w-full sm:w-1/3 memo-card p-3 flex flex-col justify-between">
+        <textarea
+          id="new-cmd"
+          rows="3"
+          placeholder="コマンドを入力..."
+          class="w-full bg-transparent resize-none outline-none font-mono text-emerald-400 text-sm placeholder-zinc-500"
+        ></textarea>
+        <div class="text-[10px] text-zinc-500 text-right select-none">command</div>
+      </div>
+
+      <!-- 説明入力マス (右側・広め) と 追加ボタン -->
+      <div class="w-full sm:w-2/3 memo-card p-3 flex flex-col justify-between relative group">
+        <textarea
+          id="new-desc"
+          rows="3"
+          placeholder="コマンドの説明を入力..."
+          class="w-full bg-transparent resize-none outline-none text-sm text-zinc-200 placeholder-zinc-500"
+        ></textarea>
+        
+        <div class="flex items-center justify-between mt-2 pt-1 border-t border-zinc-800">
+          <span class="text-[10px] text-zinc-500 select-none">description (Enterで追加)</span>
+          <button
+            id="add-btn"
+            type="button"
+            class="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 active:scale-95 text-xs text-white rounded-md transition duration-150 font-medium"
+          >
+            追加
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 登録済みリスト一覧 -->
+    <div id="list-container" class="flex flex-col gap-3">
+      <!-- JSによって動的に追加されます -->
+    </div>
+
+  </div>
+
+  <script>
+    // ローカルストレージキー
+    const STORAGE_KEY = 'minimal_cmd_cheatsheet_data';
+
+    // データの読み込み（例文なし・空配列で初期化）
+    function loadItems() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) {
+        return [];
+      }
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
+    }
+
+    // データの保存
+    function saveItems(items) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    }
+
+    let items = loadItems();
+
+    const cmdInput = document.getElementById('new-cmd');
+    const descInput = document.getElementById('new-desc');
+    const addBtn = document.getElementById('add-btn');
+    const listContainer = document.getElementById('list-container');
+
+    // リストの描画
+    function render() {
+      listContainer.innerHTML = '';
+
+      items.forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'flex flex-col sm:flex-row gap-3 relative group';
+
+        // コマンドカード (左)
+        const cmdCard = document.createElement('div');
+        cmdCard.className = 'w-full sm:w-1/3 memo-card p-3.5 flex flex-col justify-center min-h-[72px]';
+        cmdCard.innerHTML = `
+          <div class="font-mono text-sm text-emerald-400 break-all select-all whitespace-pre-wrap">${escapeHtml(item.cmd)}</div>
+        `;
+
+        // 説明カード (右)
+        const descCard = document.createElement('div');
+        descCard.className = 'w-full sm:w-2/3 memo-card p-3.5 flex items-center justify-between min-h-[72px] relative';
+        descCard.innerHTML = `
+          <div class="text-sm text-zinc-300 break-words whitespace-pre-wrap flex-1 pr-6">${escapeHtml(item.desc)}</div>
+          <button
+            data-index="${index}"
+            class="delete-btn opacity-20 group-hover:opacity-100 hover:text-red-400 text-zinc-500 p-1 transition text-xs absolute top-2 right-2"
+            title="削除"
+          >
+            ✕
+          </button>
+        `;
+
+        row.appendChild(cmdCard);
+        row.appendChild(descCard);
+        listContainer.appendChild(row);
+      });
+
+      // 削除イベントの設定
+      document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-index'), 10);
+          items.splice(idx, 1);
+          saveItems(items);
+          render();
+        });
+      });
+    }
+
+    // アイテム追加処理
+    function addItem() {
+      const cmdText = cmdInput.value.trim();
+      const descText = descInput.value.trim();
+
+      if (!cmdText && !descText) return;
+
+      // 新しい項目を追加（先頭に表示）
+      items.unshift({
+        id: Date.now().toString(),
+        cmd: cmdText || '(なし)',
+        desc: descText || '(説明なし)'
+      });
+
+      saveItems(items);
+      render();
+
+      // 入力欄をクリアしてコマンド側にフォーカス
+      cmdInput.value = '';
+      descInput.value = '';
+      cmdInput.focus();
+    }
+
+    // ボタンクリック
+    addBtn.addEventListener('click', addItem);
+
+    // 説明入力欄で Enterキー (Shift+Enterは改行)
+    descInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        addItem();
+      }
+    });
+
+    // コマンド欄で Enterキー (Tab代わりに説明欄へ移動)
+    cmdInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        descInput.focus();
+      }
+    });
+
+    // 特殊文字エスケープ
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // 初期表示
+    render();
+  </script>
+</body>
+</html>
