@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Command Memo</title>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -23,14 +24,19 @@
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 12px;
     }
-    /* 横並びを絶対に維持するグリッド設定 */
     .row {
       display: grid;
-      grid-template-columns: 32% 1fr;
+      grid-template-columns: 24px 30% 1fr;
       gap: 8px;
       width: 100%;
+    }
+    .input-row {
+      display: grid;
+      grid-template-columns: 30% 1fr;
+      gap: 8px;
+      padding-left: 32px;
     }
     .input-box, .display-box {
       background-color: #1e1e1e;
@@ -50,8 +56,7 @@
       border-color: #777;
     }
     .btn-wrap {
-      grid-column: 1 / -1;
-      display: flex;
+      padding-left: 32px;
     }
     .btn-add {
       width: 100%;
@@ -67,7 +72,19 @@
       background: #3a3a3a;
     }
     .item-row {
-      position: relative;
+      align-items: stretch;
+    }
+    .drag-handle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+      font-size: 18px;
+      cursor: grab;
+      touch-action: none;
+    }
+    .drag-handle:active {
+      cursor: grabbing;
     }
     .cmd-box {
       font-family: monospace;
@@ -76,29 +93,48 @@
     }
     .desc-box {
       word-break: break-word;
-      padding-right: 28px;
+      padding-right: 64px; /* ボタン2つ分のスペース */
       position: relative;
       white-space: pre-wrap;
     }
-    .btn-del {
+    .action-btns {
       position: absolute;
       top: 4px;
       right: 4px;
-      background: transparent;
-      border: none;
-      color: #777;
-      font-size: 16px;
-      line-height: 1;
-      padding: 4px;
+      display: flex;
+      gap: 6px;
+      z-index: 10;
+    }
+    .btn-icon {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #ccc;
+      font-size: 14px;
+      width: 26px;
+      height: 26px;
+      border-radius: 4px;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn-icon:active {
+      background: #444;
+    }
+    .btn-icon.btn-edit { color: #4dabf7; }
+    .btn-icon.btn-del { color: #ff6b6b; }
+    .btn-icon.btn-save { color: #69db7c; }
+    .sortable-ghost {
+      opacity: 0.4;
+      background-color: #2a2a2a;
+      border-radius: 6px;
     }
   </style>
 </head>
 <body>
 
   <div class="container">
-    <!-- 最上段：入力マス -->
-    <div class="row">
+    <div class="input-row">
       <textarea id="new-cmd" class="input-box" placeholder="コマンド"></textarea>
       <textarea id="new-desc" class="input-box" placeholder="説明"></textarea>
     </div>
@@ -106,16 +142,17 @@
       <button class="btn-add" id="btn-save">追加</button>
     </div>
 
-    <!-- 一覧表示エリア -->
     <div id="list" style="display:flex; flex-direction:column; gap:8px;"></div>
   </div>
 
   <script>
-    const STORAGE_KEY = 'memo_app_commands';
+    const STORAGE_KEY = 'memo_app_commands_v2';
     const newCmd = document.getElementById('new-cmd');
     const newDesc = document.getElementById('new-desc');
     const btnSave = document.getElementById('btn-save');
     const list = document.getElementById('list');
+    
+    let editingIndex = null; // 現在編集中の行番号を保持
 
     function loadItems() {
       try {
@@ -132,33 +169,123 @@
     function render() {
       const items = loadItems();
       list.innerHTML = '';
+      
       items.forEach((item, index) => {
         const row = document.createElement('div');
         row.className = 'row item-row';
+        row.dataset.cmd = item.cmd;
+        row.dataset.desc = item.desc;
 
-        const cmdEl = document.createElement('div');
-        cmdEl.className = 'display-box cmd-box';
-        cmdEl.textContent = item.cmd;
+        const handle = document.createElement('div');
+        handle.className = 'drag-handle';
+        handle.textContent = '≡';
+        row.appendChild(handle);
 
-        const descEl = document.createElement('div');
-        descEl.className = 'display-box desc-box';
-        descEl.textContent = item.desc;
+        if (editingIndex === index) {
+          // --- 編集モード ---
+          const cmdInput = document.createElement('textarea');
+          cmdInput.className = 'input-box cmd-box';
+          cmdInput.value = item.cmd;
 
-        const delBtn = document.createElement('button');
-        delBtn.className = 'btn-del';
-        delBtn.textContent = '×';
-        delBtn.onclick = () => {
-          items.splice(index, 1);
-          saveItems(items);
-          render();
-        };
+          const descWrap = document.createElement('div');
+          descWrap.style.position = 'relative';
+          descWrap.style.display = 'flex';
+          descWrap.style.width = '100%';
 
-        descEl.appendChild(delBtn);
-        row.appendChild(cmdEl);
-        row.appendChild(descEl);
+          const descInput = document.createElement('textarea');
+          descInput.className = 'input-box desc-box';
+          descInput.style.width = '100%';
+          descInput.value = item.desc;
+
+          const actionWrap = document.createElement('div');
+          actionWrap.className = 'action-btns';
+
+          const saveBtn = document.createElement('button');
+          saveBtn.className = 'btn-icon btn-save';
+          saveBtn.innerHTML = '✓';
+          saveBtn.onclick = () => {
+            const currentItems = loadItems();
+            currentItems[index].cmd = cmdInput.value.trim();
+            currentItems[index].desc = descInput.value.trim();
+            saveItems(currentItems);
+            editingIndex = null;
+            render();
+          };
+
+          const cancelBtn = document.createElement('button');
+          cancelBtn.className = 'btn-icon btn-del';
+          cancelBtn.innerHTML = '✕';
+          cancelBtn.onclick = () => {
+            editingIndex = null;
+            render();
+          };
+
+          actionWrap.appendChild(saveBtn);
+          actionWrap.appendChild(cancelBtn);
+          descWrap.appendChild(descInput);
+          descWrap.appendChild(actionWrap);
+
+          row.appendChild(cmdInput);
+          row.appendChild(descWrap);
+        } else {
+          // --- 通常モード ---
+          const cmdEl = document.createElement('div');
+          cmdEl.className = 'display-box cmd-box';
+          cmdEl.textContent = item.cmd;
+
+          const descEl = document.createElement('div');
+          descEl.className = 'display-box desc-box';
+          descEl.textContent = item.desc;
+
+          const actionWrap = document.createElement('div');
+          actionWrap.className = 'action-btns';
+
+          const editBtn = document.createElement('button');
+          editBtn.className = 'btn-icon btn-edit';
+          editBtn.innerHTML = '✎';
+          editBtn.onclick = () => {
+            editingIndex = index;
+            render();
+          };
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn-icon btn-del';
+          delBtn.innerHTML = '×';
+          delBtn.onclick = () => {
+            const currentItems = loadItems();
+            currentItems.splice(index, 1);
+            saveItems(currentItems);
+            render();
+          };
+
+          actionWrap.appendChild(editBtn);
+          actionWrap.appendChild(delBtn);
+          descEl.appendChild(actionWrap);
+
+          row.appendChild(cmdEl);
+          row.appendChild(descEl);
+        }
+        
         list.appendChild(row);
       });
     }
+
+    new Sortable(list, {
+      handle: '.drag-handle',
+      animation: 150,
+      ghostClass: 'sortable-ghost',
+      onEnd: function () {
+        const rows = list.querySelectorAll('.item-row');
+        const newOrder = Array.from(rows).map(row => ({
+          cmd: row.dataset.cmd,
+          desc: row.dataset.desc
+        }));
+        saveItems(newOrder);
+        // ドラッグ終了後、編集中のインデックスがずれるのを防ぐためにリセット
+        editingIndex = null; 
+        render();
+      }
+    });
 
     btnSave.addEventListener('click', () => {
       const cmd = newCmd.value.trim();
@@ -167,11 +294,12 @@
       if (!cmd && !desc) return;
 
       const items = loadItems();
-      items.push({ cmd, desc });
+      items.unshift({ cmd, desc });
       saveItems(items);
 
       newCmd.value = '';
       newDesc.value = '';
+      editingIndex = null;
       render();
     });
 
